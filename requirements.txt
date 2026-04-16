@@ -1,0 +1,30 @@
+# ─────────────────────────────────────────────────────────────
+# DevTeam AI — Dependencies
+# ─────────────────────────────────────────────────────────────
+
+# Agno Framework (multi-agent runtime)
+agno[os]>=2.5.0
+
+# LLM Provider SDKs
+openai>=1.0.0
+anthropic>=0.30.0
+ollama>=0.5.0
+
+# Web UI
+streamlit>=1.35.0
+
+# Configuration
+pydantic-settings>=2.0.0
+python-dotenv>=1.0.0
+
+# Database drivers
+psycopg[binary]>=3.0.0
+pgvector>=0.3.0
+
+# Embeddings y vectorización
+sentence-transformers>=2.0.0
+numpy>=1.24.0
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
