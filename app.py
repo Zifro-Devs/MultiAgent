@@ -9,6 +9,11 @@ import os
 import sys
 from pathlib import Path
 from uuid import uuid4
+import warnings
+
+# Silenciar warnings de transformers/torchvision
+warnings.filterwarnings("ignore", category=UserWarning, module="transformers")
+warnings.filterwarnings("ignore", message=".*torchvision.*")
 
 # ── Asegurar que el root del proyecto este en sys.path ──────────────
 _ROOT = str(Path(__file__).resolve().parent)
@@ -35,7 +40,7 @@ from agno.models.message import Message  # noqa: E402
 
 st.set_page_config(
     page_title="DevTeam AI",
-    page_icon="🏗️",
+    page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -46,6 +51,8 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "session_id" not in st.session_state:
     st.session_state.session_id = str(uuid4())
+if "project_name" not in st.session_state:
+    st.session_state.project_name = None  # Se definirá cuando el usuario confirme el proyecto
 if "user_id" not in st.session_state:
     st.session_state.user_id = "default-user"
 if "artifacts" not in st.session_state:
@@ -81,14 +88,13 @@ if st.session_state.artifact_monitor is None and st.session_state.memory:
 # ── Barra lateral ───────────────────────────────────────────────────
 
 with st.sidebar:
-    st.title("🏗️ DevTeam AI")
-    st.caption("Tu equipo de desarrollo con IA")
+    st.title("DevTeam AI")
     st.divider()
 
     # -- Configuracion ------------------------------------------------
-    st.subheader("⚙️ Configuracion")
+    st.subheader("Configuración")
 
-    provider_options = ["ollama", "openai", "anthropic", "google"]
+    provider_options = ["groq", "openai", "ollama", "anthropic", "google"]
     provider = st.selectbox(
         "Proveedor LLM",
         options=provider_options,
@@ -107,13 +113,61 @@ with st.sidebar:
     st.divider()
 
     # -- Gestion de sesion --------------------------------------------
-    st.subheader("💬 Sesion")
-    user_id = st.text_input("Tu nombre", value=st.session_state.user_id)
+    st.subheader("Sesión")
+    user_id = st.text_input("Usuario", value=st.session_state.user_id)
     st.session_state.user_id = user_id
+    
+    # -- Ruta de artefactos -------------------------------------------
+    st.subheader("Directorio de salida")
+    
+    # Obtener ruta actual
+    current_artifacts = str(settings.artifacts_path)
+    
+    # Opciones rápidas
+    quick_paths = {
+        "Proyecto (por defecto)": "artifacts",
+        "Escritorio": f"C:/Users/{os.environ.get('USERNAME', 'estra')}/Desktop/ProyectosIA",
+        "Documentos": f"C:/Users/{os.environ.get('USERNAME', 'estra')}/Documents/DevTeamProjects",
+        "Personalizada": "custom"
+    }
+    
+    selected_option = st.selectbox(
+        "Ubicación",
+        options=list(quick_paths.keys()),
+        index=0
+    )
+    
+    # Si selecciona personalizada, mostrar input
+    if selected_option == "Personalizada":
+        artifacts_input = st.text_input(
+            "Ruta",
+            value=current_artifacts,
+            placeholder="C:/Users/usuario/proyectos"
+        )
+    else:
+        artifacts_input = quick_paths[selected_option]
+        st.caption(f"Ruta: `{artifacts_input}`")
+    
+    # Botón para aplicar cambio de ruta
+    if st.button("Aplicar Ruta", use_container_width=True):
+        if artifacts_input and artifacts_input != current_artifacts:
+            # Actualizar en .env
+            os.environ["ARTIFACTS_DIR"] = artifacts_input
+            
+            # Forzar recarga de settings
+            from src.config.settings import get_settings
+            get_settings.cache_clear()
+            
+            st.success(f"Ruta actualizada")
+            st.rerun()
+    
+    st.caption(f"`{current_artifacts}`")
+    st.divider()
 
-    if st.button("🔄 Nueva conversacion", use_container_width=True):
+    if st.button("Nueva sesión", use_container_width=True):
         st.session_state.messages = []
         st.session_state.session_id = str(uuid4())
+        st.session_state.project_name = None  # Resetear nombre de proyecto
         st.session_state.artifacts = []
         st.session_state.team = None
         # Reiniciar memoria con nuevo project_id
@@ -126,41 +180,56 @@ with st.sidebar:
             )
         st.rerun()
 
-    st.caption(f"Sesion: `{st.session_state.session_id[:8]}...`")
+    st.caption(f"Sesión: `{st.session_state.session_id[:8]}`")
     
-    # Mostrar estado de memoria vectorizada
-    if st.session_state.memory and st.session_state.memory.is_enabled():
-        st.caption("🧠 Memoria vectorizada: ✅ Activa")
-    else:
-        st.caption("🧠 Memoria vectorizada: ⚪ Desactivada")
-
+    # Mostrar nombre del proyecto si existe
+    if st.session_state.project_name:
+        st.caption(f"Proyecto: `{st.session_state.project_name}`")
+    
     st.divider()
 
     # -- Info del pipeline --------------------------------------------
-    st.subheader("🔀 Como funciona")
+    st.subheader("Fases")
     st.markdown(
         """
-        1. 💬 **Conversacion** — Te guio paso a paso
-        2. 📋 **Analisis** — Requisitos claros
-        3. 📐 **Diseno** — Arquitectura solida
-        4. 💻 **Codigo** — Implementacion real
-        5. ✅ **Validacion** — QA y Seguridad
+        1. Análisis
+        2. Diseño
+        3. Implementación
+        4. Validación
         """
     )
 
     # -- Lista de artefactos ------------------------------------------
     artifacts_path = settings.artifacts_path
-    if artifacts_path.exists():
-        files = sorted(
-            str(f.relative_to(artifacts_path)).replace("\\", "/")
-            for f in artifacts_path.rglob("*")
-            if f.is_file() and f.name != ".gitkeep"
-        )
-        if files:
-            st.divider()
-            st.subheader(f"📁 Archivos generados ({len(files)})")
-            for fname in files:
-                st.text(f"  📄 {fname}")
+    
+    # Si hay un proyecto activo, mostrar su carpeta específica
+    if st.session_state.project_name:
+        project_path = artifacts_path / st.session_state.project_name
+        if project_path.exists():
+            files = sorted(
+                str(f.relative_to(project_path)).replace("\\", "/")
+                for f in project_path.rglob("*")
+                if f.is_file() and f.name != ".gitkeep"
+            )
+            if files:
+                st.divider()
+                st.subheader(f"Archivos ({len(files)})")
+                for fname in files[:10]:  # Mostrar solo primeros 10
+                    st.text(f"  {fname}")
+                if len(files) > 10:
+                    st.caption(f"... y {len(files) - 10} más")
+    else:
+        # Mostrar todos los proyectos disponibles
+        if artifacts_path.exists():
+            projects = sorted(
+                d.name for d in artifacts_path.iterdir() 
+                if d.is_dir() and not d.name.startswith(".")
+            )
+            if projects:
+                st.divider()
+                st.subheader(f"Proyectos ({len(projects)})")
+                for proj in projects:
+                    st.text(f"  • {proj}")
 
 # ── Verificacion de proveedor ───────────────────────────────────────
 
@@ -172,6 +241,8 @@ def _provider_ready(selected_provider: str) -> bool:
         return bool(os.environ.get("ANTHROPIC_API_KEY"))
     if selected_provider == "google":
         return bool(os.environ.get("GOOGLE_API_KEY"))
+    if selected_provider == "groq":
+        return bool(os.environ.get("GROQ_API_KEY"))
     if selected_provider == "ollama":
         return True
     return False
@@ -181,38 +252,26 @@ _provider_is_ready = _provider_ready(provider)
 
 # ── Area de contenido principal ─────────────────────────────────────
 
-st.title("🏗️ DevTeam AI")
-st.markdown(
-    "**¡Hola!** Soy tu equipo de desarrollo con IA. "
-    "Cuentame que quieres construir y te guiare paso a paso. "
-    "No necesitas saber de programacion — **yo te pregunto todo lo necesario.**"
-)
+st.title("DevTeam AI")
+st.markdown("Sistema automatizado de desarrollo de software")
 st.divider()
 
 if not _provider_is_ready:
-    st.warning(
-        "⚠️ Faltan credenciales para el proveedor seleccionado. "
-        "Configura la clave correspondiente en `.env`: "
-        "`OPENAI_API_KEY`, `ANTHROPIC_API_KEY` o `GOOGLE_API_KEY`."
-    )
+    st.warning("Configura la API key en el archivo `.env`")
     st.stop()
 
 # ── Mensaje de bienvenida inicial ───────────────────────────────────
 
 if not st.session_state.messages:
     welcome = (
-        "👋 **¡Bienvenido a DevTeam AI!**\n\n"
-        "Soy tu asistente de desarrollo de software. "
-        "Mi trabajo es ayudarte a construir tu proyecto paso a paso, "
-        "sin importar tu nivel tecnico.\n\n"
-        "**¿Que te gustaria crear hoy?** Puede ser cualquier cosa:\n"
-        "- Una pagina web\n"
-        "- Una aplicacion movil\n"
-        "- Un sistema de gestion\n"
-        "- Una API\n"
-        "- ¡Lo que necesites!\n\n"
-        "Simplemente cuentame tu idea con tus propias palabras y yo me "
-        "encargo de hacer las preguntas necesarias. 😊"
+        "**Bienvenido a DevTeam AI**\n\n"
+        "Este sistema convierte tu idea en software funcional de forma automática.\n\n"
+        "**Proceso:**\n"
+        "1. Describes tu proyecto\n"
+        "2. El sistema hace preguntas para entender los detalles\n"
+        "3. Se genera automáticamente todo el código necesario\n"
+        "4. Recibes el software completo y listo para usar\n\n"
+        "**Para comenzar, describe qué tipo de software necesitas.**"
     )
     st.session_state.messages.append({"role": "assistant", "content": welcome})
 
@@ -224,7 +283,7 @@ for msg in st.session_state.messages:
 
 # ── Entrada de chat y procesamiento ─────────────────────────────────
 
-if prompt := st.chat_input("Escribi tu idea o responde las preguntas..."):
+if prompt := st.chat_input("Escribe tu idea o responde..."):
     # Mostrar mensaje del usuario inmediatamente
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -232,7 +291,12 @@ if prompt := st.chat_input("Escribi tu idea o responde las preguntas..."):
 
     # Procesar con el equipo de desarrollo
     with st.chat_message("assistant"):
-        with st.spinner("🤔 Pensando..."):
+        # Crear contenedores para progreso
+        progress_container = st.empty()
+        status_container = st.empty()
+        response_container = st.empty()
+        
+        with st.spinner("Procesando..."):
             try:
                 # Reusar o crear el equipo (mantiene historial de conversacion)
                 if st.session_state.team is None:
@@ -243,40 +307,223 @@ if prompt := st.chat_input("Escribi tu idea o responde las preguntas..."):
                             "orchestrator_model": orch_model,
                             "ollama_host": ollama_host,
                         },
-                        session_id=st.session_state.session_id,  # ← Pasar session_id
+                        session_id=st.session_state.session_id,
+                        project_name=st.session_state.project_name,
                     )
 
                 team = st.session_state.team
 
                 # Construir historial completo como List[Message]
-                # para que el orquestador SIEMPRE tenga contexto
                 messages: list[Message] = []
                 for msg in st.session_state.messages:
-                    # Saltar el mensaje de bienvenida (ya esta en las instrucciones)
                     if msg["role"] == "assistant" and msg is st.session_state.messages[0]:
                         continue
                     messages.append(
                         Message(role=msg["role"], content=msg["content"])
                     )
+                
+                # Buscar contexto relevante en memoria vectorizada SOLO si es útil
+                memory = st.session_state.memory
+                context_info = ""
+                
+                search_keywords = ["similar", "como antes", "parecido", "igual que", "anterior", 
+                                 "proyecto anterior", "ya hice", "reutilizar", "basado en"]
+                should_search = any(keyword in prompt.lower() for keyword in search_keywords)
+                is_first_interaction = len(st.session_state.messages) <= 2
+                
+                if memory and memory.is_enabled() and (should_search or is_first_interaction):
+                    try:
+                        similar_context = memory.search_similar_context(
+                            query=prompt,
+                            session_id=None,
+                            limit=2
+                        )
+                        
+                        context_parts = []
+                        
+                        if similar_context["requirements"]:
+                            high_similarity = [r for r in similar_context["requirements"] if r["similarity"] > 0.8]
+                            if high_similarity:
+                                context_parts.append("Requisitos similares:")
+                                for req in high_similarity[:1]:
+                                    context_parts.append(f"- {req['requirement_id']}: {req['content'][:100]}...")
+                        
+                        if similar_context["designs"]:
+                            high_similarity = [d for d in similar_context["designs"] if d["similarity"] > 0.8]
+                            if high_similarity:
+                                context_parts.append("\nDiseños similares:")
+                                for design in high_similarity[:1]:
+                                    context_parts.append(f"- {design['component_name']}")
+                        
+                        if context_parts:
+                            context_info = "\n\n---\nCONTEXTO:\n" + "\n".join(context_parts) + "\n---\n"
+                    except Exception as e:
+                        import logging
+                        logging.warning(f"Error buscando en memoria: {e}")
+                
+                if context_info and messages:
+                    last_user_msg = messages[-1]
+                    if last_user_msg.role == "user":
+                        last_user_msg.content += context_info
 
-                result = team.run(
-                    messages,
-                    user_id=st.session_state.user_id,
-                    session_id=st.session_state.session_id,
-                    stream=False,
-                )
+                # Mostrar barra de progreso inicial
+                progress_bar = progress_container.progress(0)
+                status_text = status_container.info("Procesando...")
+                
+                # Ejecutar el orquestador primero
+                result = team.run(messages, user_id=st.session_state.user_id, session_id=st.session_state.session_id, stream=False)
+                
+                # Detectar si el orquestador quiere ejecutar el pipeline
+                execute_match = None
+                if result and result.content:
+                    import re
+                    execute_match = re.search(r'EJECUTAR_PIPELINE:([a-z0-9-]+)', result.content, re.IGNORECASE)
+                
+                # Si detectó el comando, ejecutar pipeline automáticamente
+                if execute_match:
+                    project_name = execute_match.group(1).lower().strip()
+                    st.session_state.project_name = project_name
+                    
+                    status_text.info("Ejecutando...")
+                    
+                    # Recrear team con proyecto
+                    st.session_state.team = create_dev_team(
+                        overrides={
+                            "llm_provider": provider,
+                            "llm_model": model_id,
+                            "orchestrator_model": orch_model,
+                            "ollama_host": ollama_host,
+                        },
+                        session_id=st.session_state.session_id,
+                        project_name=project_name,
+                    )
+                    team = st.session_state.team
+                    
+                    # Contexto completo
+                    full_context = "\n\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-10:]])
+                    full_response = f"**{project_name}**\n\n"
+                    
+                    # 1. ANÁLISIS - Pasar TODO el contexto
+                    progress_bar.progress(10)
+                    status_text.info("Fase 1/4: Análisis")
+                    analysis_prompt = f"""Genera especificación IEEE 830 COMPLETA basada en esta conversación:
+
+{full_context}
+
+IMPORTANTE:
+- Incluye TODOS los requisitos funcionales mencionados
+- Agrega requisitos no funcionales (rendimiento, seguridad, escalabilidad)
+- Define historias de usuario detalladas
+- Especifica casos de uso con flujos completos
+- Define modelo de datos conceptual
+"""
+                    analysis_result = team.members[0].run(analysis_prompt)
+                    full_response += f"1. Análisis completado\n"
+                    progress_bar.progress(25)
+                    
+                    # 2. DISEÑO - Pasar requisitos COMPLETOS
+                    status_text.info("Fase 2/4: Diseño")
+                    design_prompt = f"""Diseña arquitectura COMPLETA basada en estos requisitos:
+
+{analysis_result.content}
+
+DEBES INCLUIR:
+- Arquitectura de componentes (frontend, backend, BD)
+- Diseño de base de datos (tablas, relaciones, índices, SQL)
+- APIs REST completas (todos los endpoints con request/response)
+- Stack tecnológico justificado
+- Diagramas de arquitectura
+- Decisiones de diseño (ADRs)
+"""
+                    design_result = team.members[1].run(design_prompt)
+                    full_response += f"2. Diseño completado\n"
+                    progress_bar.progress(50)
+                    
+                    # 3. IMPLEMENTACIÓN - Pasar diseño COMPLETO
+                    status_text.info("Fase 3/4: Implementación")
+                    impl_prompt = f"""GENERA TODO EL CÓDIGO FUNCIONAL basado en este diseño:
+
+{design_result.content}
+
+DEBES GENERAR:
+
+BACKEND:
+- Todos los endpoints de la API
+- Modelos de base de datos
+- Lógica de negocio
+- Validaciones
+- Manejo de errores
+- Scripts SQL para crear tablas
+
+FRONTEND:
+- Componentes React completos
+- Páginas principales
+- Integración con API
+- Estilos CSS
+- Formularios funcionales
+
+CONFIGURACIÓN:
+- requirements.txt / package.json
+- .env.example
+- README.md con instrucciones
+- Docker (opcional)
+
+TESTS:
+- Tests unitarios backend
+- Tests de integración
+
+El código debe ser 100% FUNCIONAL y EJECUTABLE inmediatamente.
+"""
+                    impl_result = team.members[2].run(impl_prompt)
+                    full_response += f"3. Implementación completada\n"
+                    progress_bar.progress(75)
+                    
+                    # 4. VALIDACIÓN - Validar TODO
+                    status_text.info("Fase 4/4: Validación")
+                    val_prompt = f"""Valida el código generado:
+
+DISEÑO:
+{design_result.content[:1000]}
+
+REVISA:
+1. Seguridad OWASP Top 10
+2. Calidad de código (SOLID, DRY)
+3. Cobertura de requisitos
+4. Tests funcionales
+5. Genera tests adicionales si faltan
+
+Genera informe de validación y tests faltantes.
+"""
+                    val_result = team.members[3].run(val_prompt)
+                    full_response += f"4. Validación completada\n\n"
+                    progress_bar.progress(100)
+                    
+                    full_response += f"Proyecto completado en: `artifacts/{project_name}/`"
+                    result = type('obj', (object,), {'content': full_response})()
+                    status_text.success("Completado")
+                
+                # Si no ejecutó pipeline, ya tiene el result del orquestador
+                progress_bar.progress(100)
+                if not execute_match:
+                    status_text.success("Listo")
+                
+                # Detectar nombre del proyecto en la respuesta si aún no existe
+                if result and result.content and not st.session_state.project_name:
+                    import re
+                    match = re.search(r'\*\*Nombre\*\*:\s*\[?([a-z0-9-]+)\]?', result.content, re.IGNORECASE)
+                    if match:
+                        project_name = match.group(1).lower().strip()
+                        st.session_state.project_name = project_name
                 
                 # Almacenar en memoria vectorizada
                 memory = st.session_state.memory
                 if memory and memory.is_enabled():
-                    # Almacenar mensaje del usuario
                     memory.store_conversation_message(
                         session_id=st.session_state.session_id,
                         role="user",
                         content=prompt
                     )
                     
-                    # Almacenar respuesta del asistente
                     if result and result.content:
                         memory.store_conversation_message(
                             session_id=st.session_state.session_id,
@@ -284,35 +531,37 @@ if prompt := st.chat_input("Escribi tu idea o responde las preguntas..."):
                             content=result.content
                         )
                         
-                        # Detectar y almacenar artefactos específicos
                         response_lower = result.content.lower()
                         
-                        # Si es documento de requisitos
                         if "requisitos funcionales" in response_lower or "rf-" in response_lower:
                             memory.store_requirements(
                                 session_id=st.session_state.session_id,
                                 requirements_doc=result.content
                             )
                         
-                        # Si es documento de diseño
                         if "arquitectura" in response_lower or "adr-" in response_lower:
                             memory.store_design_components(
                                 session_id=st.session_state.session_id,
                                 design_doc=result.content
                             )
                         
-                        # Escanear y almacenar artefactos generados
                         if st.session_state.artifact_monitor:
                             st.session_state.artifact_monitor.scan_and_store(
                                 session_id=st.session_state.session_id
                             )
 
             except Exception as exc:
+                progress_container.empty()
+                status_container.empty()
                 st.error(f"Error: {exc}")
                 import traceback
                 st.code(traceback.format_exc())
                 st.stop()
 
+        # Limpiar contenedores de progreso
+        progress_container.empty()
+        status_container.empty()
+        
         # Mostrar la respuesta
         response_text = (
             result.content if result and result.content else "No se genero respuesta."
@@ -325,25 +574,54 @@ if prompt := st.chat_input("Escribi tu idea o responde las preguntas..."):
         )
 
         # Mostrar artefactos generados (si los hay)
-        if artifacts_path.exists():
-            generated = sorted(
-                str(f.relative_to(artifacts_path)).replace("\\", "/")
-                for f in artifacts_path.rglob("*")
-                if f.is_file() and f.name != ".gitkeep"
-            )
-            if generated:
-                with st.expander(
-                    f"📁 Archivos generados ({len(generated)})",
-                    expanded=False,
-                ):
-                    for fname in generated:
-                        file_path = artifacts_path / fname
-                        lang = fname.rsplit(".", 1)[-1] if "." in fname else ""
-                        st.markdown(f"**`{fname}`**")
-                        try:
-                            st.code(
-                                file_path.read_text(encoding="utf-8"),
-                                language=lang,
-                            )
-                        except Exception:
-                            st.text("(no se pudo leer el archivo)")
+        artifacts_path = settings.artifacts_path
+        
+        # Buscar en la carpeta del proyecto si existe
+        if st.session_state.project_name:
+            project_path = artifacts_path / st.session_state.project_name
+            if project_path.exists():
+                generated = sorted(
+                    str(f.relative_to(project_path)).replace("\\", "/")
+                    for f in project_path.rglob("*")
+                    if f.is_file() and f.name != ".gitkeep"
+                )
+                if generated:
+                    with st.expander(
+                        f"📁 Archivos generados en {st.session_state.project_name}/ ({len(generated)})",
+                        expanded=False,
+                    ):
+                        for fname in generated:
+                            file_path = project_path / fname
+                            lang = fname.rsplit(".", 1)[-1] if "." in fname else ""
+                            st.markdown(f"**`{fname}`**")
+                            try:
+                                st.code(
+                                    file_path.read_text(encoding="utf-8"),
+                                    language=lang,
+                                )
+                            except Exception:
+                                st.text("(no se pudo leer el archivo)")
+        else:
+            # Fallback: buscar en artifacts general
+            if artifacts_path.exists():
+                generated = sorted(
+                    str(f.relative_to(artifacts_path)).replace("\\", "/")
+                    for f in artifacts_path.rglob("*")
+                    if f.is_file() and f.name != ".gitkeep"
+                )
+                if generated:
+                    with st.expander(
+                        f"📁 Archivos generados ({len(generated)})",
+                        expanded=False,
+                    ):
+                        for fname in generated:
+                            file_path = artifacts_path / fname
+                            lang = fname.rsplit(".", 1)[-1] if "." in fname else ""
+                            st.markdown(f"**`{fname}`**")
+                            try:
+                                st.code(
+                                    file_path.read_text(encoding="utf-8"),
+                                    language=lang,
+                                )
+                            except Exception:
+                                st.text("(no se pudo leer el archivo)")

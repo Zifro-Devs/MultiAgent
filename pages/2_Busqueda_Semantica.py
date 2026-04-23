@@ -23,7 +23,7 @@ from src.storage.memory_integration import MemoryIntegration
 # Configuración de página
 st.set_page_config(
     page_title="Búsqueda Semántica - DevTeam AI",
-    page_icon="🔍",
+    page_icon="⚡",
     layout="wide",
 )
 
@@ -32,20 +32,20 @@ settings = get_settings()
 memory = MemoryIntegration(settings)
 
 # Título
-st.title("🔍 Búsqueda Semántica")
-st.markdown("Encuentra proyectos, conversaciones y código similar usando IA.")
+st.title("Búsqueda Semántica")
+st.markdown("Encuentra proyectos, conversaciones y código similar.")
 st.divider()
 
 # Verificar si está habilitada
 if not memory.is_enabled():
     st.warning("""
-    ⚠️ **Búsqueda Semántica Deshabilitada**
+    **Búsqueda Semántica Deshabilitada**
     
     La búsqueda semántica requiere PostgreSQL (Supabase) con la extensión pgvector.
     
     **Para habilitarla:**
     1. Configura `SUPABASE_DB_URL` en tu archivo `.env`
-    2. Ve a la página de **Sesiones** → **Configuración**
+    2. Ve a la página de Sesiones → Configuración
     3. Haz clic en "Crear/Verificar Tablas Vectorizadas"
     
     Actualmente estás usando SQLite, que no soporta búsqueda vectorial.
@@ -53,7 +53,7 @@ if not memory.is_enabled():
     st.stop()
 
 # Interfaz de búsqueda
-st.subheader("🎯 Buscar en tu Historial")
+st.subheader("Buscar en tu Historial")
 
 col_search1, col_search2 = st.columns([4, 1])
 
@@ -86,9 +86,9 @@ with st.expander("🔧 Filtros Avanzados", expanded=False):
         )
 
 # Botón de búsqueda
-if st.button("🔍 Buscar", type="primary", use_container_width=True):
+if st.button("Buscar", type="primary", use_container_width=True):
     if not query:
-        st.warning("⚠️ Por favor ingresa un término de búsqueda")
+        st.warning("Por favor ingresa un término de búsqueda")
     else:
         with st.spinner("🤖 Buscando con IA..."):
             results = memory.search_similar_context(
@@ -106,7 +106,7 @@ if st.button("🔍 Buscar", type="primary", use_container_width=True):
         if total_results == 0:
             st.info("📭 No se encontraron resultados. Intenta con otros términos de búsqueda.")
         else:
-            st.success(f"✅ {total_results} resultados encontrados")
+            st.success(f"{total_results} resultados encontrados")
             
             # Tabs por categoría
             tabs = []
@@ -117,15 +117,15 @@ if st.button("🔍 Buscar", type="primary", use_container_width=True):
                 tabs.append("conversations")
             
             if "Requisitos" in search_categories and results["requirements"]:
-                tab_names.append(f"📋 Requisitos ({len(results['requirements'])})")
+                tab_names.append(f"Requisitos ({len(results['requirements'])})")
                 tabs.append("requirements")
             
             if "Diseños" in search_categories and results["designs"]:
-                tab_names.append(f"🏗️ Diseños ({len(results['designs'])})")
+                tab_names.append(f"Diseños ({len(results['designs'])})")
                 tabs.append("designs")
             
             if "Código" in search_categories and results["code"]:
-                tab_names.append(f"💻 Código ({len(results['code'])})")
+                tab_names.append(f"Código ({len(results['code'])})")
                 tabs.append("code")
             
             if not tabs:
@@ -152,7 +152,7 @@ if st.button("🔍 Buscar", type="primary", use_container_width=True):
                         elif tab_key == "requirements":
                             for idx, req in enumerate(results["requirements"]):
                                 with st.expander(
-                                    f"📋 {req['requirement_id']} - {req['requirement_type']} - Similitud: {req['similarity']:.2%}",
+                                    f"{req['requirement_id']} - {req['requirement_type']} - Similitud: {req['similarity']:.2%}",
                                     expanded=idx == 0
                                 ):
                                     st.markdown(f"**Proyecto:** `{req['project_id'][:12]}...`")
@@ -164,7 +164,7 @@ if st.button("🔍 Buscar", type="primary", use_container_width=True):
                         elif tab_key == "designs":
                             for idx, design in enumerate(results["designs"]):
                                 with st.expander(
-                                    f"🏗️ {design['component_name']} - Similitud: {design['similarity']:.2%}",
+                                    f"{design['component_name']} - Similitud: {design['similarity']:.2%}",
                                     expanded=idx == 0
                                 ):
                                     st.markdown(f"**Proyecto:** `{design['project_id'][:12]}...`")
@@ -176,7 +176,7 @@ if st.button("🔍 Buscar", type="primary", use_container_width=True):
                         elif tab_key == "code":
                             for idx, code in enumerate(results["code"]):
                                 with st.expander(
-                                    f"💻 {code['file_path']} - Similitud: {code['similarity']:.2%}",
+                                    f"{code['file_path']} - Similitud: {code['similarity']:.2%}",
                                     expanded=idx == 0
                                 ):
                                     st.markdown(f"**Proyecto:** `{code['project_id'][:12]}...`")
@@ -191,9 +191,9 @@ if st.button("🔍 Buscar", type="primary", use_container_width=True):
 # Información adicional
 st.divider()
 
-with st.expander("ℹ️ ¿Cómo funciona la búsqueda semántica?", expanded=False):
+with st.expander("¿Cómo funciona la búsqueda semántica?", expanded=False):
     st.markdown("""
-    ### 🧠 Búsqueda Inteligente con IA
+    ### Búsqueda Inteligente con IA
     
     A diferencia de la búsqueda tradicional por palabras clave, la búsqueda semántica:
     
@@ -226,7 +226,7 @@ with st.expander("ℹ️ ¿Cómo funciona la búsqueda semántica?", expanded=Fa
     - "manejo de errores centralizado"
     """)
 
-with st.expander("📊 Estadísticas de Memoria", expanded=False):
+with st.expander("Estadísticas de Memoria", expanded=False):
     st.markdown("""
     ### 📈 Estado de la Memoria Vectorizada
     

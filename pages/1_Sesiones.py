@@ -25,7 +25,7 @@ from src.storage.session_manager import SessionManager
 # Configuración de página
 st.set_page_config(
     page_title="Sesiones - DevTeam AI",
-    page_icon="📚",
+    page_icon="⚡",
     layout="wide",
 )
 
@@ -35,12 +35,12 @@ db = get_database(settings)
 session_mgr = SessionManager(db)
 
 # Título
-st.title("📚 Gestión de Sesiones")
+st.title("Gestión de Sesiones")
 st.markdown("Administra tus conversaciones y proyectos anteriores.")
 st.divider()
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["🔍 Explorar Sesiones", "📊 Estadísticas", "⚙️ Configuración"])
+tab1, tab2, tab3 = st.tabs(["Explorar Sesiones", "Estadísticas", "Configuración"])
 
 # ── TAB 1: Explorar Sesiones ────────────────────────────────────────
 
@@ -51,7 +51,7 @@ with tab1:
         st.subheader("Sesiones Activas")
     
     with col2:
-        if st.button("🔄 Actualizar", use_container_width=True):
+        if st.button("Actualizar", use_container_width=True):
             st.rerun()
     
     # Filtros
@@ -71,14 +71,14 @@ with tab1:
         )
     
     if not sessions:
-        st.info("📭 No hay sesiones guardadas todavía. ¡Comienza una nueva conversación!")
+        st.info("No hay sesiones guardadas todavía. ¡Comienza una nueva conversación!")
     else:
-        st.success(f"✅ {len(sessions)} sesiones encontradas")
+        st.success(f"{len(sessions)} sesiones encontradas")
         
         # Mostrar sesiones
         for idx, session in enumerate(sessions):
             with st.expander(
-                f"🗂️ Sesión {idx + 1}: {session['session_id'][:12]}... "
+                f"Sesión {idx + 1}: {session['session_id'][:12]}... "
                 f"({session['message_count']} mensajes)",
                 expanded=False
             ):
@@ -107,7 +107,7 @@ with tab1:
                         st.session_state['viewing_session'] = session['session_id']
                 
                 with col_action2:
-                    if st.button("▶️ Continuar", key=f"continue_{session['session_id']}", use_container_width=True):
+                    if st.button("Continuar", key=f"continue_{session['session_id']}", use_container_width=True):
                         # Cargar sesión en la app principal
                         st.session_state.session_id = session['session_id']
                         st.session_state.user_id = session['user_id']
@@ -120,8 +120,8 @@ with tab1:
                             for msg in messages
                         ]
                         
-                        st.success(f"✅ Sesión cargada: {session['session_id'][:12]}...")
-                        st.info("👉 Ve a la página principal para continuar la conversación")
+                        st.success(f"Sesión cargada: {session['session_id'][:12]}...")
+                        st.info("Ve a la página principal para continuar la conversación")
                 
                 with col_action3:
                     if st.button("📥 Exportar", key=f"export_{session['session_id']}", use_container_width=True):
@@ -141,7 +141,7 @@ with tab1:
                             export_text += "-" * 80 + "\n\n"
                         
                         st.download_button(
-                            label="💾 Descargar TXT",
+                            label="Descargar TXT",
                             data=export_text,
                             file_name=f"session_{session['session_id'][:8]}.txt",
                             mime="text/plain",
@@ -150,31 +150,31 @@ with tab1:
                         )
                 
                 with col_action4:
-                    if st.button("🗑️ Eliminar", key=f"delete_{session['session_id']}", type="secondary", use_container_width=True):
+                    if st.button("Eliminar", key=f"delete_{session['session_id']}", type="secondary", use_container_width=True):
                         st.session_state[f'confirm_delete_{session["session_id"]}'] = True
                 
                 # Confirmación de eliminación
                 if st.session_state.get(f'confirm_delete_{session["session_id"]}', False):
-                    st.warning("⚠️ ¿Estás seguro? Esta acción no se puede deshacer.")
+                    st.warning("¿Estás seguro? Esta acción no se puede deshacer.")
                     col_confirm1, col_confirm2 = st.columns(2)
                     
                     with col_confirm1:
-                        if st.button("✅ Sí, eliminar", key=f"confirm_yes_{session['session_id']}", use_container_width=True):
+                        if st.button("Sí, eliminar", key=f"confirm_yes_{session['session_id']}", use_container_width=True):
                             if session_mgr.delete_session(session['session_id']):
-                                st.success("✅ Sesión eliminada correctamente")
+                                st.success("Sesión eliminada correctamente")
                                 del st.session_state[f'confirm_delete_{session["session_id"]}']
                                 st.rerun()
                             else:
-                                st.error("❌ Error al eliminar la sesión")
+                                st.error("Error al eliminar la sesión")
                     
                     with col_confirm2:
-                        if st.button("❌ Cancelar", key=f"confirm_no_{session['session_id']}", use_container_width=True):
+                        if st.button("Cancelar", key=f"confirm_no_{session['session_id']}", use_container_width=True):
                             del st.session_state[f'confirm_delete_{session["session_id"]}']
                             st.rerun()
                 
                 # Mostrar mensajes si se solicitó
                 if st.session_state.get('viewing_session') == session['session_id']:
-                    st.markdown("### 💬 Historial de Mensajes")
+                    st.markdown("### Historial de Mensajes")
                     
                     messages = session_mgr.get_session_messages(session['session_id'])
                     
@@ -186,14 +186,14 @@ with tab1:
                     else:
                         st.info("No hay mensajes en esta sesión")
                     
-                    if st.button("❌ Cerrar", key=f"close_view_{session['session_id']}"):
+                    if st.button("Cerrar", key=f"close_view_{session['session_id']}"):
                         del st.session_state['viewing_session']
                         st.rerun()
 
 # ── TAB 2: Estadísticas ─────────────────────────────────────────────
 
 with tab2:
-    st.subheader("📊 Estadísticas Generales")
+    st.subheader("Estadísticas Generales")
     
     with st.spinner("Calculando estadísticas..."):
         all_sessions = session_mgr.get_active_sessions(limit=1000)
@@ -219,7 +219,7 @@ with tab2:
         st.divider()
         
         # Gráfico de actividad
-        st.subheader("📈 Actividad Reciente")
+        st.subheader("Actividad Reciente")
         
         # Preparar datos para gráfico
         import pandas as pd
@@ -247,22 +247,22 @@ with tab2:
         st.dataframe(user_activity, use_container_width=True, hide_index=True)
     
     else:
-        st.info("📭 No hay datos suficientes para mostrar estadísticas")
+        st.info("No hay datos suficientes para mostrar estadísticas")
 
 # ── TAB 3: Configuración ────────────────────────────────────────────
 
 with tab3:
-    st.subheader("⚙️ Configuración de Sesiones")
+    st.subheader("Configuración de Sesiones")
     
     st.markdown("""
     ### Base de Datos Actual
     """)
     
     if settings.supabase_db_url:
-        st.success("✅ **PostgreSQL (Supabase)** - Producción")
+        st.success("PostgreSQL (Supabase) - Producción")
         st.caption("Memoria persistente con soporte para múltiples usuarios")
     else:
-        st.info("ℹ️ **SQLite Local** - Desarrollo")
+        st.info("SQLite Local - Desarrollo")
         st.caption(f"Base de datos: `{settings.project_root / 'data' / 'devteam.db'}`")
     
     st.divider()
@@ -272,7 +272,7 @@ with tab3:
     """)
     
     if settings.supabase_db_url:
-        st.success("✅ **Habilitada** - Búsqueda semántica activa")
+        st.success("Habilitada - Búsqueda semántica activa")
         st.caption("Permite encontrar proyectos y conversaciones similares")
         
         # Verificar si las tablas existen
@@ -280,16 +280,16 @@ with tab3:
             from src.storage.vector_memory import VectorMemory
             vm = VectorMemory(settings.supabase_db_url)
             
-            if st.button("🔧 Crear/Verificar Tablas Vectorizadas"):
+            if st.button("Crear/Verificar Tablas Vectorizadas"):
                 with st.spinner("Creando tablas..."):
                     vm.create_tables()
-                    st.success("✅ Tablas vectorizadas verificadas/creadas")
+                    st.success("Tablas vectorizadas verificadas/creadas")
             
             vm.close()
         except Exception as e:
-            st.error(f"❌ Error: {e}")
+            st.error(f"Error: {e}")
     else:
-        st.warning("⚠️ **Deshabilitada** - Requiere PostgreSQL")
+        st.warning("Deshabilitada - Requiere PostgreSQL")
         st.caption("La memoria vectorizada solo funciona con Supabase/PostgreSQL")
     
     st.divider()
@@ -301,12 +301,12 @@ with tab3:
     col_maint1, col_maint2 = st.columns(2)
     
     with col_maint1:
-        if st.button("🧹 Limpiar Sesiones Antiguas", use_container_width=True):
-            st.info("🚧 Función en desarrollo")
+        if st.button("Limpiar Sesiones Antiguas", use_container_width=True):
+            st.info("Función en desarrollo")
     
     with col_maint2:
-        if st.button("📦 Exportar Todas las Sesiones", use_container_width=True):
-            st.info("🚧 Función en desarrollo")
+        if st.button("Exportar Todas las Sesiones", use_container_width=True):
+            st.info("Función en desarrollo")
     
     st.divider()
     

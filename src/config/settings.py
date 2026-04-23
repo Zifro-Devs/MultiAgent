@@ -36,11 +36,14 @@ class Settings(BaseSettings):
 
     # ── LLM ────────────────────────────────────────────────────────
     openai_api_key: str = ""
+    openai_api_base: str = ""
     anthropic_api_key: str = ""
-    llm_provider: Literal["openai", "anthropic", "google", "ollama"] = "ollama"
+    groq_api_key: str = ""
+    llm_provider: Literal["openai", "anthropic", "google", "ollama", "groq"] = "ollama"
     llm_model: str = "qwen3:4b"
     orchestrator_model: str = "qwen3:4b"
     ollama_host: str = "http://localhost:11434"
+    default_model: str = ""  # Para OpenRouter
 
     # ── Database ───────────────────────────────────────────────────
     supabase_db_url: str = ""
@@ -60,8 +63,22 @@ class Settings(BaseSettings):
 
     @property
     def artifacts_path(self) -> Path:
-        """Return *resolved* artifacts directory (auto-created)."""
-        path = self.project_root / self.artifacts_dir
+        """Return *resolved* artifacts directory (auto-created).
+        
+        Soporta rutas absolutas y relativas:
+        - Relativa: "artifacts" → project_root/artifacts
+        - Absoluta: "C:/Users/..." → usa la ruta tal cual
+        """
+        artifacts_dir = self.artifacts_dir.strip()
+        
+        # Si es ruta absoluta, usarla directamente
+        path = Path(artifacts_dir)
+        if path.is_absolute():
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        
+        # Si es relativa, usar desde project_root
+        path = self.project_root / artifacts_dir
         path.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -88,12 +105,22 @@ def get_model(
     """
     cfg = get_settings()
     provider = provider or cfg.llm_provider
-    model_id = model_id or cfg.llm_model
+    model_id = model_id or cfg.llm_model or cfg.default_model
 
     if provider == "openai":
         from agno.models.openai import OpenAIChat
 
-        return OpenAIChat(id=model_id)
+        # Si hay OPENAI_API_BASE configurado, es OpenRouter
+        if cfg.openai_api_base:
+            logger.info(f"Using OpenRouter with model: {model_id}")
+            return OpenAIChat(
+                id=model_id,
+                api_key=cfg.openai_api_key,
+                base_url=cfg.openai_api_base,
+                max_tokens=4096  # Límite razonable para evitar errores de créditos
+            )
+        else:
+            return OpenAIChat(id=model_id)
 
     if provider == "anthropic":
         from agno.models.anthropic import Claude
@@ -110,5 +137,14 @@ def get_model(
 
         host = cfg.ollama_host.strip() if cfg.ollama_host else ""
         return Ollama(id=model_id, host=host or None)
+
+    if provider == "groq":
+        from agno.models.groq import Groq
+
+        return Groq(
+            id=model_id,
+            api_key=cfg.groq_api_key,
+            max_tokens=4096
+        )
 
     raise ValueError(f"Unsupported LLM provider: {provider!r}")
