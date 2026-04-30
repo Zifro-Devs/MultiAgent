@@ -54,6 +54,16 @@ FORMATO SALIDA (Markdown):
 ## 6. Stack Tecnológico
 | Capa | Tecnología | Justificación |
 
+FRONTEND (cuando aplica):
+- Framework moderno: React 18+, Vue 3+, Svelte o Next.js — NUNCA HTML plano
+- TypeScript obligatorio para type safety
+- Estilos: Tailwind CSS, styled-components o CSS Modules — NUNCA inline styles
+- Estado: Context API, Zustand, Redux Toolkit según complejidad
+- Routing: React Router, Vue Router o equivalente
+- HTTP: Axios o fetch con interceptors para auth y retry
+- Validación: Zod, Yup o similar para schemas
+- Build: Vite o equivalente moderno — NUNCA Webpack sin configurar
+
 ## 7. Arquitectura Seguridad
 - Autenticación
 - Autorización (RBAC/ABAC)

@@ -80,6 +80,10 @@ class ArtifactTools(Toolkit):
         Returns:
             JSON confirmation with byte count, or an error object.
         """
+        # El LLM a veces envía \n, \t como escapes literales en lugar de caracteres reales
+        if "\\n" in content and "\n" not in content:
+            content = content.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "")
+
         byte_len = len(content.encode("utf-8"))
         if byte_len > self._MAX_BYTES:
             return self._err(f"content exceeds {self._MAX_BYTES} bytes ({byte_len})")

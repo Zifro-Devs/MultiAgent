@@ -1,11 +1,12 @@
-"""Sistema de Memoria Vectorizada con pgvector.
+﻿"""Sistema de Memoria Vectorizada con pgvector.
 
-Permite búsqueda semántica de conversaciones, requisitos, diseños
-y código generado anteriormente.
+Permite bÃºsqueda semÃ¡ntica de conversaciones, requisitos, diseÃ±os
+y cÃ³digo generado anteriormente.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import List, Optional, Dict, Any
 import numpy as np
@@ -15,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 
 class VectorMemory:
-    """Gestiona memoria vectorizada con embeddings para búsqueda semántica."""
+    """Gestiona memoria vectorizada con embeddings para bÃºsqueda semÃ¡ntica."""
 
     def __init__(self, db_url: str, embedding_model: str = "all-MiniLM-L6-v2"):
         """Inicializa el sistema de memoria vectorizada.
         
         Args:
-            db_url: URL de conexión a PostgreSQL con pgvector
+            db_url: URL de conexiÃ³n a PostgreSQL con pgvector
             embedding_model: Modelo de sentence-transformers para embeddings
         """
         self.db_url = db_url.replace("postgresql+psycopg://", "postgresql://")
@@ -33,13 +34,21 @@ class VectorMemory:
     def encoder(self):
         """Lazy loading del modelo de embeddings."""
         if self._encoder is None:
+            import logging
+            import warnings
+            # Suprimir logs ruidosos durante la carga del modelo
+            warnings.filterwarnings("ignore", category=UserWarning)
+            logging.getLogger("sentence_transformers").setLevel(logging.ERROR)
+            logging.getLogger("transformers").setLevel(logging.ERROR)
+            logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+
             from sentence_transformers import SentenceTransformer
             logger.info(f"Cargando modelo de embeddings: {self.embedding_model_name}")
-            self._encoder = SentenceTransformer(self.embedding_model_name)
+            self._encoder = SentenceTransformer(self.embedding_model_name, local_files_only=False)
         return self._encoder
     
     def get_connection(self):
-        """Obtiene conexión a PostgreSQL."""
+        """Obtiene conexiÃ³n a PostgreSQL."""
         if self._conn is None or self._conn.closed:
             import psycopg
             self._conn = psycopg.connect(self.db_url)
@@ -50,7 +59,7 @@ class VectorMemory:
         conn = self.get_connection()
         cur = conn.cursor()
         
-        # Activar extensión pgvector
+        # Activar extensiÃ³n pgvector
         cur.execute("CREATE EXTENSION IF NOT EXISTS vector;")
         
         # Tabla de embeddings de conversaciones
@@ -80,7 +89,7 @@ class VectorMemory:
             );
         """)
         
-        # Tabla de embeddings de diseño
+        # Tabla de embeddings de diseÃ±o
         cur.execute("""
             CREATE TABLE IF NOT EXISTS design_embeddings (
                 id SERIAL PRIMARY KEY,
@@ -94,7 +103,7 @@ class VectorMemory:
             );
         """)
         
-        # Tabla de embeddings de código
+        # Tabla de embeddings de cÃ³digo
         cur.execute("""
             CREATE TABLE IF NOT EXISTS code_embeddings (
                 id SERIAL PRIMARY KEY,
@@ -108,7 +117,7 @@ class VectorMemory:
             );
         """)
         
-        # Índices para búsqueda vectorial eficiente (HNSW)
+        # Ãndices para bÃºsqueda vectorial eficiente (HNSW)
         cur.execute("""
             CREATE INDEX IF NOT EXISTS conversation_embeddings_idx 
             ON conversation_embeddings 
@@ -135,8 +144,12 @@ class VectorMemory:
         
         conn.commit()
         cur.close()
-        logger.info("✅ Tablas de memoria vectorizada creadas")
+        logger.info("âœ… Tablas de memoria vectorizada creadas")
     
+    def _to_json(self, value: Optional[Dict]) -> Optional[str]:
+        """Serializa un dict a JSON string para psycopg."""
+        return json.dumps(value, ensure_ascii=False) if value is not None else None
+
     def generate_embedding(self, text: str) -> np.ndarray:
         """Genera embedding para un texto.
         
@@ -155,10 +168,10 @@ class VectorMemory:
         message_id: Optional[int] = None,
         metadata: Optional[Dict[str, Any]] = None
     ):
-        """Almacena una conversación con su embedding.
+        """Almacena una conversaciÃ³n con su embedding.
         
         Args:
-            session_id: ID de la sesión
+            session_id: ID de la sesiÃ³n
             content: Contenido del mensaje
             message_id: ID del mensaje (opcional)
             metadata: Metadata adicional (opcional)
@@ -172,11 +185,11 @@ class VectorMemory:
             INSERT INTO conversation_embeddings 
             (session_id, message_id, content, embedding, metadata)
             VALUES (%s, %s, %s, %s, %s)
-        """, (session_id, message_id, content, embedding.tolist(), metadata))
+        """, (session_id, message_id, content, embedding.tolist(), self._to_json(metadata)))
         
         conn.commit()
         cur.close()
-        logger.debug(f"Conversación almacenada: session={session_id}")
+        logger.debug(f"ConversaciÃ³n almacenada: session={session_id}")
     
     def store_requirement(
         self,
@@ -196,7 +209,7 @@ class VectorMemory:
             INSERT INTO requirement_embeddings 
             (project_id, requirement_id, requirement_type, content, embedding, metadata)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (project_id, requirement_id, requirement_type, content, embedding.tolist(), metadata))
+        """, (project_id, requirement_id, requirement_type, content, embedding.tolist(), self._to_json(metadata)))
         
         conn.commit()
         cur.close()
@@ -210,7 +223,7 @@ class VectorMemory:
         design_type: str = "component",
         metadata: Optional[Dict[str, Any]] = None
     ):
-        """Almacena un componente de diseño con su embedding."""
+        """Almacena un componente de diseÃ±o con su embedding."""
         embedding = self.generate_embedding(content)
         
         conn = self.get_connection()
@@ -220,11 +233,11 @@ class VectorMemory:
             INSERT INTO design_embeddings 
             (project_id, component_name, design_type, content, embedding, metadata)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (project_id, component_name, design_type, content, embedding.tolist(), metadata))
+        """, (project_id, component_name, design_type, content, embedding.tolist(), self._to_json(metadata)))
         
         conn.commit()
         cur.close()
-        logger.debug(f"Diseño almacenado: {component_name}")
+        logger.debug(f"DiseÃ±o almacenado: {component_name}")
     
     def store_code(
         self,
@@ -234,7 +247,7 @@ class VectorMemory:
         code_type: str = "module",
         metadata: Optional[Dict[str, Any]] = None
     ):
-        """Almacena código con su embedding."""
+        """Almacena cÃ³digo con su embedding."""
         embedding = self.generate_embedding(content)
         
         conn = self.get_connection()
@@ -244,11 +257,11 @@ class VectorMemory:
             INSERT INTO code_embeddings 
             (project_id, file_path, code_type, content, embedding, metadata)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (project_id, file_path, code_type, content, embedding.tolist(), metadata))
+        """, (project_id, file_path, code_type, content, embedding.tolist(), self._to_json(metadata)))
         
         conn.commit()
         cur.close()
-        logger.debug(f"Código almacenado: {file_path}")
+        logger.debug(f"CÃ³digo almacenado: {file_path}")
     
     def search_similar_conversations(
         self,
@@ -256,12 +269,12 @@ class VectorMemory:
         limit: int = 5,
         session_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Busca conversaciones similares usando búsqueda semántica.
+        """Busca conversaciones similares usando bÃºsqueda semÃ¡ntica.
         
         Args:
-            query: Texto de búsqueda
-            limit: Número máximo de resultados
-            session_id: Filtrar por sesión específica (opcional)
+            query: Texto de bÃºsqueda
+            limit: NÃºmero mÃ¡ximo de resultados
+            session_id: Filtrar por sesiÃ³n especÃ­fica (opcional)
             
         Returns:
             Lista de conversaciones similares con scores
@@ -354,7 +367,7 @@ class VectorMemory:
         limit: int = 5,
         project_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Busca diseños similares."""
+        """Busca diseÃ±os similares."""
         query_embedding = self.generate_embedding(query)
         
         conn = self.get_connection()
@@ -400,7 +413,7 @@ class VectorMemory:
         limit: int = 5,
         project_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Busca código similar."""
+        """Busca cÃ³digo similar."""
         query_embedding = self.generate_embedding(query)
         
         conn = self.get_connection()
@@ -441,6 +454,7 @@ class VectorMemory:
         ]
     
     def close(self):
-        """Cierra la conexión."""
+        """Cierra la conexiÃ³n."""
         if self._conn and not self._conn.closed:
             self._conn.close()
+

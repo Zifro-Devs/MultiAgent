@@ -1,0 +1,7 @@
+[server]
+# Evita que Streamlit inspeccione módulos de transformers/torch que no están instalados
+fileWatcherType = "poll"
+
+[logger]
+# Reducir nivel de logs de Streamlit
+level = "error"
