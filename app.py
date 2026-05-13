@@ -41,13 +41,14 @@ import streamlit as st  # noqa: E402
 
 from src.config.settings import get_settings  # noqa: E402
 from src.orchestrator.team import create_dev_team  # noqa: E402
+from src.orchestrator.pipeline import run_pipeline, NullReporter  # noqa: E402
 from src.storage.memory_integration import MemoryIntegration  # noqa: E402
 from src.storage.database import get_database  # noqa: E402
 from src.storage.session_manager import SessionManager  # noqa: E402
 from src.storage.artifact_monitor import ArtifactMonitor  # noqa: E402
 from src.storage.knowledge_memory import KnowledgeMemory  # noqa: E402
 from src.agents.learning import LearningAgent  # noqa: E402
-from src.agents.documentation import create_documentation_agent  # noqa: E402
+from src.agents.analysis import create_analysis_agent  # noqa: E402
 
 from agno.models.message import Message  # noqa: E402
 
@@ -111,6 +112,18 @@ if st.session_state.knowledge is None and settings.supabase_db_url:
         km.ensure_table()
         st.session_state.knowledge = km
         st.session_state.learning_agent = LearningAgent(settings, km)
+        # Mantenimiento periódico: decay + consolidación (solo una vez por sesión)
+        if not st.session_state.get("_knowledge_maintained"):
+            try:
+                maint_stats = st.session_state.learning_agent.periodic_maintenance()
+                logger.info(
+                    "Mantenimiento de conocimiento: decay=%d consolidados=%d",
+                    maint_stats.get("decay_affected", 0),
+                    maint_stats.get("consolidated", 0),
+                )
+                st.session_state._knowledge_maintained = True
+            except Exception as _me:
+                logger.warning(f"Mantenimiento falló: {_me}")
     except Exception as _e:
         logger.warning(f"No se pudo inicializar KnowledgeMemory: {_e}")
 
@@ -260,6 +273,38 @@ with st.sidebar:
                 for proj in projects:
                     st.text(f"  • {proj}")
 
+    # -- Conocimiento aprendido ---------------------------------------
+    if st.session_state.knowledge is not None:
+        st.divider()
+        st.subheader("Conocimiento del sistema")
+        try:
+            kstats = st.session_state.knowledge.get_knowledge_stats()
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Insights activos", kstats.get("total_active", 0))
+            with col2:
+                st.metric("Archivados", kstats.get("total_archived", 0))
+
+            by_cat = kstats.get("by_category", [])
+            if by_cat:
+                with st.expander("Por categoría", expanded=False):
+                    for c in by_cat[:10]:
+                        st.text(
+                            f"  {c['category']}: {c['count']} "
+                            f"(score {c['avg_score']})"
+                        )
+
+            top = kstats.get("top_insights", [])
+            if top:
+                with st.expander("Top insights", expanded=False):
+                    for t in top[:5]:
+                        st.caption(
+                            f"★ {t['score']} · {t['title'][:60]} "
+                            f"(×{t['reinforcement']})"
+                        )
+        except Exception as _se:
+            st.caption("No se pudieron cargar estadísticas")
+
 # ── Verificacion de proveedor ───────────────────────────────────────
 
 
@@ -407,201 +452,99 @@ if prompt := st.chat_input("Escribe tu idea o responde..."):
                     import re
                     execute_match = re.search(r'EJECUTAR_PIPELINE:([a-z0-9-]+)', result.content, re.IGNORECASE)
                 
-                # Si detectó el comando, ejecutar pipeline automáticamente
+                # Si detectó el comando, ejecutar pipeline mejorado
                 if execute_match:
                     project_name = execute_match.group(1).lower().strip()
                     st.session_state.project_name = project_name
-                    
-                    status_text.info("Ejecutando...")
-                    
-                    # Recrear team con proyecto
-                    st.session_state.team = create_dev_team(
-                        overrides={
-                            "llm_provider": provider,
-                            "llm_model": model_id,
-                            "orchestrator_model": orch_model,
-                            "ollama_host": ollama_host,
-                        },
-                        session_id=st.session_state.session_id,
-                        project_name=project_name,
+
+                    # Contexto y conocimiento previo
+                    full_context = "\n\n".join(
+                        f"{m['role']}: {m['content']}"
+                        for m in st.session_state.messages[-10:]
                     )
-                    team = st.session_state.team
-                    
-                    # Contexto completo
-                    full_context = "\n\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-10:]])
-                    full_response = f"**{project_name}**\n\n"
-                    
-                    # Recuperar conocimiento previo relevante para este proyecto
+
                     prior_knowledge = ""
+                    prior_knowledge_ids: list[int] = []
                     if st.session_state.knowledge:
                         try:
                             relevant = st.session_state.knowledge.search_relevant_knowledge(
                                 query=full_context[:300],
                                 limit=6,
+                                project_type=None,
                             )
                             if relevant:
-                                knowledge_lines = []
-                                for k in relevant:
-                                    knowledge_lines.append(
-                                        f"[{k['category']}] {k['title']}: {k['insight']}"
-                                    )
+                                knowledge_lines = [
+                                    f"[{k['category']}] {k['title']}: {k['insight']}"
+                                    for k in relevant
+                                ]
+                                prior_knowledge_ids = [k["id"] for k in relevant]
                                 prior_knowledge = (
-                                    "\n\nCONOCIMIENTO PREVIO RELEVANTE (aprendido de proyectos anteriores):\n"
+                                    "\n\nCONOCIMIENTO PREVIO RELEVANTE (aprendido "
+                                    "de proyectos anteriores):\n"
                                     + "\n".join(knowledge_lines)
                                     + "\nAplica este conocimiento donde sea pertinente.\n"
                                 )
                         except Exception as _ke:
                             logger.warning(f"Error recuperando conocimiento: {_ke}")
 
-                    # 1. ANÁLISIS - Pasar TODO el contexto
-                    progress_bar.progress(10)
-                    status_text.info("Fase 1/4: Análisis")
-                    analysis_prompt = f"""Genera especificación IEEE 830 COMPLETA basada en esta conversación:
+                    # Reporter que integra con Streamlit progress + status
+                    class _StreamlitReporter:
+                        def set_status(self, phase: str, message: str) -> None:
+                            status_text.info(f"{phase}: {message}")
 
-{full_context}
-{prior_knowledge}
-IMPORTANTE:
-- Incluye TODOS los requisitos funcionales mencionados
-- Agrega requisitos no funcionales (rendimiento, seguridad, escalabilidad)
-- Define historias de usuario detalladas
-- Especifica casos de uso con flujos completos
-- Define modelo de datos conceptual
-"""
-                    analysis_result = team.members[0].run(analysis_prompt)
-                    full_response += f"1. Análisis completado\n"
-                    progress_bar.progress(25)
-                    
-                    # 2. DISEÑO - Pasar requisitos COMPLETOS
-                    status_text.info("Fase 2/4: Diseño")
-                    design_prompt = f"""Diseña arquitectura COMPLETA basada en estos requisitos:
+                        def set_progress(self, pct: int) -> None:
+                            progress_bar.progress(min(max(pct, 0), 100))
 
-{analysis_result.content}
+                    # Agente de análisis con la configuración efectiva
+                    analysis_agent = create_analysis_agent(settings)
 
-DEBES INCLUIR:
-- Arquitectura de componentes (frontend, backend, BD)
-- Diseño de base de datos (tablas, relaciones, índices, SQL)
-- APIs REST completas (todos los endpoints con request/response)
-- Stack tecnológico justificado
-- Diagramas de arquitectura
-- Decisiones de diseño (ADRs)
-"""
-                    design_result = team.members[1].run(design_prompt)
-                    full_response += f"2. Diseño completado\n"
-                    progress_bar.progress(50)
-                    
-                    # 3. IMPLEMENTACIÓN
-                    status_text.info("Fase 3/5: Implementación")
-                    impl_prompt = f"""Implementa el sistema completo basado en este diseño:
-
-{design_result.content}
-
-EXIGENCIAS:
-- Implementa CADA módulo, CADA endpoint, CADA vista definida en el diseño — sin excepción
-- Nada de "// TODO", nada de stubs, nada de placeholders — código real que funciona
-- La BD se conecta exclusivamente via variables de entorno. Genera el script SQL completo \
-con tablas, relaciones, índices, constraints y datos seed para arrancar
-- El .env.example debe tener TODAS las variables documentadas — el usuario solo pone sus \
-credenciales y el sistema arranca sin tocar código
-- Frontend: implementa TODAS las páginas con sus estados de carga, error y vacío
-- El sistema debe ser indistinguible de uno hecho por un equipo de desarrollo profesional
-"""
-                    impl_result = team.members[2].run(impl_prompt)
-                    full_response += f"3. Implementación completada\n"
-                    progress_bar.progress(75)
-                    
-                    # 4. VALIDACIÓN
-                    status_text.info("Fase 4/5: Validación")
-                    val_prompt = f"""Valida el código generado:
-
-DISEÑO:
-{design_result.content[:1000]}
-
-REVISA:
-1. Seguridad OWASP Top 10
-2. Calidad de código (SOLID, DRY)
-3. Cobertura de requisitos
-4. Tests funcionales
-5. Genera tests adicionales si faltan
-
-Genera informe de validación y tests faltantes.
-"""
-                    val_result = team.members[3].run(val_prompt)
-                    full_response += f"4. Validación completada\n"
-                    progress_bar.progress(80)
-
-                    # 5. DOCUMENTACIÓN
-                    status_text.info("Fase 5/5: Documentación")
-                    try:
-                        project_artifacts_dir = str(settings.artifacts_path / project_name)
-                        doc_agent = create_documentation_agent(settings, artifacts_dir=project_artifacts_dir)
-                        doc_prompt = f"""Genera la documentación completa del proyecto.
-
-CONTEXTO DEL PROYECTO:
-- Nombre: {project_name}
-- Lo que pidió el usuario: {full_context[:400]}
-
-ANÁLISIS (requisitos):
-{analysis_result.content[:1200]}
-
-DISEÑO (arquitectura y stack):
-{design_result.content[:1200]}
-
-VALIDACIÓN (estado del código):
-{val_result.content[:600]}
-
-Lee los archivos reales del proyecto con list_files() y read_file() \
-para que la documentación sea 100% específica a lo que se generó. \
-Luego escribe README.md y PROYECTO.md en la raíz del proyecto.
-"""
-                        doc_result = doc_agent.run(doc_prompt)
-                        full_response += f"5. Documentación generada\n\n"
-                    except Exception as _de:
-                        logger.error(f"Error generando documentación: {_de}")
-                        full_response += f"5. Documentación (error: {_de})\n\n"
-                        doc_result = type('obj', (object,), {'content': ''})()
+                    # Ejecutar pipeline completo
+                    pipeline_result = run_pipeline(
+                        settings=settings,
+                        project_name=project_name,
+                        user_context=full_context,
+                        prior_knowledge=prior_knowledge,
+                        prior_knowledge_ids=prior_knowledge_ids,
+                        analysis_agent=analysis_agent,
+                        reporter=_StreamlitReporter(),
+                        enable_code_validation=True,
+                        max_implementation_retries=1,
+                        learning_agent=st.session_state.learning_agent,
+                    )
 
                     progress_bar.progress(100)
-                    full_response += f"Proyecto completado en: `artifacts/{project_name}/`"
-                    result = type('obj', (object,), {'content': full_response})()
-                    status_text.success("Completado")
+                    status_text.success("Pipeline completado")
 
-                    # ── APRENDIZAJE AUTÓNOMO ─────────────────────────────
-                    # La IA analiza el proyecto y guarda lo que vale la pena recordar
+                    # Construir respuesta visible al usuario
+                    full_response = pipeline_result.render_user_summary()
+                    result = type("obj", (object,), {"content": full_response})()
+
+                    # Aprendizaje autónomo — basado en el resultado estructurado
                     if st.session_state.learning_agent:
                         try:
-                            impl_files = []
-                            project_path = settings.artifacts_path / project_name
-                            if project_path.exists():
-                                impl_files = [
-                                    str(f.relative_to(project_path)).replace("\\", "/")
-                                    for f in project_path.rglob("*") if f.is_file()
-                                ]
-                            impl_summary = f"Archivos generados ({len(impl_files)}): " + ", ".join(impl_files[:20])
-
-                            # Detectar tipo de proyecto desde el contexto
-                            ptype = "web"
-                            ctx_lower = full_context.lower()
-                            if "api" in ctx_lower or "rest" in ctx_lower:
-                                ptype = "api"
-                            elif "mobile" in ctx_lower or "móvil" in ctx_lower:
-                                ptype = "mobile"
-                            elif "cli" in ctx_lower or "terminal" in ctx_lower:
-                                ptype = "cli"
-                            elif "machine learning" in ctx_lower or " ml " in ctx_lower:
-                                ptype = "ml"
-
+                            impl_summary = (
+                                f"Archivos generados ({len(pipeline_result.files_generated)}): "
+                                + ", ".join(pipeline_result.files_generated[:20])
+                            )
+                            ptype = (
+                                pipeline_result.stack_profile.project_type
+                                if pipeline_result.stack_profile
+                                else "web"
+                            )
                             saved_count = st.session_state.learning_agent.learn_from_project(
                                 project_name=project_name,
                                 project_type=ptype,
                                 user_request=full_context[:600],
-                                analysis_doc=analysis_result.content,
-                                design_doc=design_result.content,
+                                analysis_doc=pipeline_result.analysis_doc,
+                                design_doc=pipeline_result.design_doc,
                                 implementation_summary=impl_summary,
-                                validation_result=val_result.content[:500],
-                                extra_context=doc_result.content[:300] if doc_result and doc_result.content else None,
+                                validation_result=pipeline_result.validation_report[:500],
+                                extra_context=pipeline_result.documentation_summary[:300],
                             )
                             if saved_count > 0:
-                                logger.info(f"Sistema aprendió {saved_count} insights de '{project_name}'")
+                                logger.info(
+                                    f"Sistema aprendió {saved_count} insights de '{project_name}'"
+                                )
                         except Exception as _le:
                             logger.error(f"Error en aprendizaje: {_le}")
                 
